@@ -96,18 +96,18 @@ where
     type Batch = BatchFreeze<Tr::Key, Tr::Val, Tr::Time, Tr::R, Tr::Batch, F>;
     type Cursor = CursorFreeze<Tr::Key, Tr::Val, Tr::Time, Tr::R, Tr::Cursor, F>;
 
-    fn map_batches<F2: FnMut(&Self::Batch)>(&mut self, mut f: F2) {
+    fn map_batches<F2: FnMut(&Self::Batch)>(&self, mut f: F2) {
         let func = &self.func;
         self.trace.map_batches(|batch| {
             f(&Self::Batch::make_from(batch.clone(), func.clone()));
         })
     }
 
-    fn advance_by(&mut self, frontier: AntichainRef<Tr::Time>) { self.trace.advance_by(frontier) }
-    fn advance_frontier(&mut self) -> AntichainRef<Tr::Time> { self.trace.advance_frontier() }
+    fn set_logical_compaction(&mut self, frontier: AntichainRef<Tr::Time>) { self.trace.set_logical_compaction(frontier) }
+    fn get_logical_compaction(&mut self) -> AntichainRef<Tr::Time> { self.trace.get_logical_compaction() }
 
-    fn distinguish_since(&mut self, frontier: AntichainRef<Tr::Time>) { self.trace.distinguish_since(frontier) }
-    fn distinguish_frontier(&mut self) -> AntichainRef<Tr::Time> { self.trace.distinguish_frontier() }
+    fn set_physical_compaction(&mut self, frontier: AntichainRef<Tr::Time>) { self.trace.set_physical_compaction(frontier) }
+    fn get_physical_compaction(&mut self) -> AntichainRef<Tr::Time> { self.trace.get_physical_compaction() }
 
     fn cursor_through(&mut self, upper: AntichainRef<Tr::Time>) -> Option<(Self::Cursor, <Self::Cursor as Cursor<Tr::Key, Tr::Val, Tr::Time, Tr::R>>::Storage)> {
         let func = &self.func;

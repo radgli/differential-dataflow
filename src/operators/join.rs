@@ -4,7 +4,6 @@
 //! the multiplication distributes over addition. That is, we will repeatedly evaluate (a + b) * c as (a * c)
 //! + (b * c), and if this is not equal to the former term, little is known about the actual output.
 use std::fmt::Debug;
-use std::ops::Mul;
 use std::cmp::Ordering;
 
 use timely::order::PartialOrder;
@@ -17,7 +16,7 @@ use timely::dataflow::channels::pushers::tee::Tee;
 
 use hashable::Hashable;
 use ::{Data, ExchangeData, Collection, AsCollection};
-use ::difference::{Semigroup, Abelian};
+use ::difference::{Semigroup, Abelian, Multiply};
 use lattice::Lattice;
 use operators::arrange::{Arranged, ArrangeByKey, ArrangeBySelf};
 use trace::{BatchReader, Cursor};
@@ -53,13 +52,13 @@ pub trait Join<G: Scope, K: Data, V: Data, R: Semigroup> {
     ///     });
     /// }
     /// ```
-    fn join<V2, R2>(&self, other: &Collection<G, (K,V2), R2>) -> Collection<G, (K,(V,V2)), <R as Mul<R2>>::Output>
+    fn join<V2, R2>(&self, other: &Collection<G, (K,V2), R2>) -> Collection<G, (K,(V,V2)), <R as Multiply<R2>>::Output>
     where
         K: ExchangeData,
         V2: ExchangeData,
         R2: ExchangeData+Semigroup,
-        R: Mul<R2>,
-        <R as Mul<R2>>::Output: Semigroup
+        R: Multiply<R2>,
+        <R as Multiply<R2>>::Output: Semigroup
     {
         self.join_map(other, |k,v,v2| (k.clone(),(v.clone(),v2.clone())))
     }
@@ -87,8 +86,8 @@ pub trait Join<G: Scope, K: Data, V: Data, R: Semigroup> {
     ///     });
     /// }
     /// ```
-    fn join_map<V2, R2, D, L>(&self, other: &Collection<G, (K,V2), R2>, logic: L) -> Collection<G, D, <R as Mul<R2>>::Output>
-    where K: ExchangeData, V2: ExchangeData, R2: ExchangeData+Semigroup, R: Mul<R2>, <R as Mul<R2>>::Output: Semigroup, D: Data, L: FnMut(&K, &V, &V2)->D+'static;
+    fn join_map<V2, R2, D, L>(&self, other: &Collection<G, (K,V2), R2>, logic: L) -> Collection<G, D, <R as Multiply<R2>>::Output>
+    where K: ExchangeData, V2: ExchangeData, R2: ExchangeData+Semigroup, R: Multiply<R2>, <R as Multiply<R2>>::Output: Semigroup, D: Data, L: FnMut(&K, &V, &V2)->D+'static;
 
     /// Matches pairs `(key, val)` and `key` based on `key`, producing the former with frequencies multiplied.
     ///
@@ -117,8 +116,8 @@ pub trait Join<G: Scope, K: Data, V: Data, R: Semigroup> {
     ///     });
     /// }
     /// ```
-    fn semijoin<R2>(&self, other: &Collection<G, K, R2>) -> Collection<G, (K, V), <R as Mul<R2>>::Output>
-    where K: ExchangeData, R2: ExchangeData+Semigroup, R: Mul<R2>, <R as Mul<R2>>::Output: Semigroup;
+    fn semijoin<R2>(&self, other: &Collection<G, K, R2>) -> Collection<G, (K, V), <R as Multiply<R2>>::Output>
+    where K: ExchangeData, R2: ExchangeData+Semigroup, R: Multiply<R2>, <R as Multiply<R2>>::Output: Semigroup;
     /// Subtracts the semijoin with `other` from `self`.
     ///
     /// In the case that `other` has multiplicities zero or one this results
@@ -151,7 +150,7 @@ pub trait Join<G: Scope, K: Data, V: Data, R: Semigroup> {
     /// }
     /// ```
     fn antijoin<R2>(&self, other: &Collection<G, K, R2>) -> Collection<G, (K, V), R>
-    where K: ExchangeData, R2: ExchangeData+Semigroup, R: Mul<R2, Output = R>, R: Abelian;
+    where K: ExchangeData, R2: ExchangeData+Semigroup, R: Multiply<R2, Output = R>, R: Abelian;
 }
 
 impl<G, K, V, R> Join<G, K, V, R> for Collection<G, (K, V), R>
@@ -162,22 +161,22 @@ where
     R: ExchangeData+Semigroup,
     G::Timestamp: Lattice+Ord,
 {
-    fn join_map<V2: ExchangeData, R2: ExchangeData+Semigroup, D: Data, L>(&self, other: &Collection<G, (K, V2), R2>, mut logic: L) -> Collection<G, D, <R as Mul<R2>>::Output>
-    where R: Mul<R2>, <R as Mul<R2>>::Output: Semigroup, L: FnMut(&K, &V, &V2)->D+'static {
+    fn join_map<V2: ExchangeData, R2: ExchangeData+Semigroup, D: Data, L>(&self, other: &Collection<G, (K, V2), R2>, mut logic: L) -> Collection<G, D, <R as Multiply<R2>>::Output>
+    where R: Multiply<R2>, <R as Multiply<R2>>::Output: Semigroup, L: FnMut(&K, &V, &V2)->D+'static {
         let arranged1 = self.arrange_by_key();
         let arranged2 = other.arrange_by_key();
         arranged1.join_core(&arranged2, move |k,v1,v2| Some(logic(k,v1,v2)))
     }
 
-    fn semijoin<R2: ExchangeData+Semigroup>(&self, other: &Collection<G, K, R2>) -> Collection<G, (K, V), <R as Mul<R2>>::Output>
-    where R: Mul<R2>, <R as Mul<R2>>::Output: Semigroup {
+    fn semijoin<R2: ExchangeData+Semigroup>(&self, other: &Collection<G, K, R2>) -> Collection<G, (K, V), <R as Multiply<R2>>::Output>
+    where R: Multiply<R2>, <R as Multiply<R2>>::Output: Semigroup {
         let arranged1 = self.arrange_by_key();
         let arranged2 = other.arrange_by_self();
         arranged1.join_core(&arranged2, |k,v,_| Some((k.clone(), v.clone())))
     }
 
     fn antijoin<R2: ExchangeData+Semigroup>(&self, other: &Collection<G, K, R2>) -> Collection<G, (K, V), R>
-    where R: Mul<R2, Output=R>, R: Abelian {
+    where R: Multiply<R2, Output=R>, R: Abelian {
         self.concat(&self.semijoin(other).negate())
     }
 }
@@ -193,20 +192,20 @@ where
     Tr::Batch: BatchReader<Tr::Key,Tr::Val,G::Timestamp,Tr::R>+'static,
     Tr::Cursor: Cursor<Tr::Key,Tr::Val,G::Timestamp,Tr::R>+'static,
 {
-    fn join_map<V2: ExchangeData, R2: ExchangeData+Semigroup, D: Data, L>(&self, other: &Collection<G, (Tr::Key, V2), R2>, mut logic: L) -> Collection<G, D, <Tr::R as Mul<R2>>::Output>
-    where Tr::Key: ExchangeData, Tr::R: Mul<R2>, <Tr::R as Mul<R2>>::Output: Semigroup, L: FnMut(&Tr::Key, &Tr::Val, &V2)->D+'static {
+    fn join_map<V2: ExchangeData, R2: ExchangeData+Semigroup, D: Data, L>(&self, other: &Collection<G, (Tr::Key, V2), R2>, mut logic: L) -> Collection<G, D, <Tr::R as Multiply<R2>>::Output>
+    where Tr::Key: ExchangeData, Tr::R: Multiply<R2>, <Tr::R as Multiply<R2>>::Output: Semigroup, L: FnMut(&Tr::Key, &Tr::Val, &V2)->D+'static {
         let arranged2 = other.arrange_by_key();
         self.join_core(&arranged2, move |k,v1,v2| Some(logic(k,v1,v2)))
     }
 
-    fn semijoin<R2: ExchangeData+Semigroup>(&self, other: &Collection<G, Tr::Key, R2>) -> Collection<G, (Tr::Key, Tr::Val), <Tr::R as Mul<R2>>::Output>
-    where Tr::Key: ExchangeData, Tr::R: Mul<R2>, <Tr::R as Mul<R2>>::Output: Semigroup {
+    fn semijoin<R2: ExchangeData+Semigroup>(&self, other: &Collection<G, Tr::Key, R2>) -> Collection<G, (Tr::Key, Tr::Val), <Tr::R as Multiply<R2>>::Output>
+    where Tr::Key: ExchangeData, Tr::R: Multiply<R2>, <Tr::R as Multiply<R2>>::Output: Semigroup {
         let arranged2 = other.arrange_by_self();
         self.join_core(&arranged2, |k,v,_| Some((k.clone(), v.clone())))
     }
 
     fn antijoin<R2: ExchangeData+Semigroup>(&self, other: &Collection<G, Tr::Key, R2>) -> Collection<G, (Tr::Key, Tr::Val), Tr::R>
-    where Tr::Key: ExchangeData, Tr::R: Mul<R2, Output=Tr::R>, Tr::R: Abelian {
+    where Tr::Key: ExchangeData, Tr::R: Multiply<R2, Output=Tr::R>, Tr::R: Abelian {
         self.as_collection(|k,v| (k.clone(), v.clone()))
             .concat(&self.semijoin(other).negate())
     }
@@ -237,7 +236,6 @@ pub trait JoinCore<G: Scope, K: 'static, V: 'static, R: Semigroup> where G::Time
     /// use differential_dataflow::operators::join::JoinCore;
     /// use differential_dataflow::trace::Trace;
     /// use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    /// use differential_dataflow::hashable::OrdWrapper;
     ///
     /// fn main() {
     ///     ::timely::example(|scope| {
@@ -254,15 +252,15 @@ pub trait JoinCore<G: Scope, K: 'static, V: 'static, R: Semigroup> where G::Time
     ///     });
     /// }
     /// ```
-    fn join_core<Tr2,I,L> (&self, stream2: &Arranged<G,Tr2>, result: L) -> Collection<G,I::Item,<R as Mul<Tr2::R>>::Output>
+    fn join_core<Tr2,I,L> (&self, stream2: &Arranged<G,Tr2>, result: L) -> Collection<G,I::Item,<R as Multiply<Tr2::R>>::Output>
     where
         Tr2: TraceReader<Key=K, Time=G::Timestamp>+Clone+'static,
         Tr2::Batch: BatchReader<K, Tr2::Val, G::Timestamp, Tr2::R>+'static,
         Tr2::Cursor: Cursor<K, Tr2::Val, G::Timestamp, Tr2::R>+'static,
         Tr2::Val: Ord+Clone+Debug+'static,
         Tr2::R: Semigroup,
-        R: Mul<Tr2::R>,
-        <R as Mul<Tr2::R>>::Output: Semigroup,
+        R: Multiply<Tr2::R>,
+        <R as Multiply<Tr2::R>>::Output: Semigroup,
         I: IntoIterator,
         I::Item: Data,
         L: FnMut(&K,&V,&Tr2::Val)->I+'static,
@@ -278,15 +276,15 @@ where
     R: ExchangeData+Semigroup,
     G::Timestamp: Lattice+Ord,
 {
-    fn join_core<Tr2,I,L> (&self, stream2: &Arranged<G,Tr2>, result: L) -> Collection<G,I::Item,<R as Mul<Tr2::R>>::Output>
+    fn join_core<Tr2,I,L> (&self, stream2: &Arranged<G,Tr2>, result: L) -> Collection<G,I::Item,<R as Multiply<Tr2::R>>::Output>
     where
         Tr2: TraceReader<Key=K, Time=G::Timestamp>+Clone+'static,
         Tr2::Batch: BatchReader<K, Tr2::Val, G::Timestamp, Tr2::R>+'static,
         Tr2::Cursor: Cursor<K, Tr2::Val, G::Timestamp, Tr2::R>+'static,
         Tr2::Val: Ord+Clone+Debug+'static,
         Tr2::R: Semigroup,
-        R: Mul<Tr2::R>,
-        <R as Mul<Tr2::R>>::Output: Semigroup,
+        R: Multiply<Tr2::R>,
+        <R as Multiply<Tr2::R>>::Output: Semigroup,
         I: IntoIterator,
         I::Item: Data,
         L: FnMut(&K,&V,&Tr2::Val)->I+'static,
@@ -307,119 +305,176 @@ impl<G, T1> JoinCore<G, T1::Key, T1::Val, T1::R> for Arranged<G,T1>
         T1::Batch: BatchReader<T1::Key,T1::Val,G::Timestamp,T1::R>+'static,
         T1::Cursor: Cursor<T1::Key,T1::Val,G::Timestamp,T1::R>+'static,
 {
-    fn join_core<Tr2,I,L>(&self, other: &Arranged<G,Tr2>, mut result: L) -> Collection<G,I::Item,<T1::R as Mul<Tr2::R>>::Output>
+    fn join_core<Tr2,I,L>(&self, other: &Arranged<G,Tr2>, mut result: L) -> Collection<G,I::Item,<T1::R as Multiply<Tr2::R>>::Output>
     where
         Tr2::Val: Ord+Clone+Debug+'static,
         Tr2: TraceReader<Key=T1::Key,Time=G::Timestamp>+Clone+'static,
         Tr2::Batch: BatchReader<T1::Key, Tr2::Val, G::Timestamp, Tr2::R>+'static,
         Tr2::Cursor: Cursor<T1::Key, Tr2::Val, G::Timestamp, Tr2::R>+'static,
         Tr2::R: Semigroup,
-        T1::R: Mul<Tr2::R>,
-        <T1::R as Mul<Tr2::R>>::Output: Semigroup,
+        T1::R: Multiply<Tr2::R>,
+        <T1::R as Multiply<Tr2::R>>::Output: Semigroup,
         I: IntoIterator,
         I::Item: Data,
         L: FnMut(&T1::Key,&T1::Val,&Tr2::Val)->I+'static {
 
-        // handles to shared trace data structures.
-        let mut trace1 = Some(self.trace.clone());
-        let mut trace2 = Some(other.trace.clone());
+        // Rename traces for symmetry from here on out.
+        let mut trace1 = self.trace.clone();
+        let mut trace2 = other.trace.clone();
 
-        // acknowledged frontier for each input.
-        use timely::progress::frontier::Antichain;
-        let mut acknowledged1: Option<Antichain<G::Timestamp>> = None;
-        let mut acknowledged2: Option<Antichain<G::Timestamp>> = None;
+        self.stream.binary_frontier(&other.stream, Pipeline, Pipeline, "Join", move |capability, info| {
 
-        // deferred work of batches from each input.
-        let mut todo1 = std::collections::VecDeque::new();
-        let mut todo2 = std::collections::VecDeque::new();
-
-        let mut input1_buffer = Vec::new();
-        let mut input2_buffer = Vec::new();
-
-        self.stream.binary_frontier(&other.stream, Pipeline, Pipeline, "Join", move |_cap, info| {
-
+            // Acquire an activator to reschedule the operator when it has unfinished work.
             use timely::scheduling::Activator;
             let activations = self.stream.scope().activations().clone();
             let activator = Activator::new(&info.address[..], activations);
 
+            // Our initial invariants are that for each trace, physical compaction is less or equal the trace's upper bound.
+            // These invariants ensure that we can reference observed batch frontiers from `_start_upper` onward, as long as
+            // we maintain our physical compaction capabilities appropriately. These assertions are tested as we load up the
+            // initial work for the two traces, and before the operator is constructed.
+
+            // Acknowledged frontier for each input.
+            // These two are used exclusively to track batch boundaries on which we may want/need to call `cursor_through`.
+            // They will drive our physical compaction of each trace, and we want to maintain at all times that each is beyond
+            // the physical compaction frontier of their corresponding trace.
+            // Should we ever *drop* a trace, these are 1. much harder to maintain correctly, but 2. no longer used.
+            use timely::progress::frontier::Antichain;
+            let mut acknowledged1 = Antichain::from_elem(<G::Timestamp>::minimum());
+            let mut acknowledged2 = Antichain::from_elem(<G::Timestamp>::minimum());
+
+            // deferred work of batches from each input.
+            let mut todo1 = std::collections::VecDeque::new();
+            let mut todo2 = std::collections::VecDeque::new();
+
+            // We'll unload the initial batches here, to put ourselves in a less non-deterministic state to start.
+            trace1.map_batches(|batch1| {
+                acknowledged1.clone_from(batch1.upper());
+                // No `todo1` work here, because we haven't accepted anything into `batches2` yet.
+                // It is effectively "empty", because we choose to drain `trace1` before `trace2`.
+                // Once we start streaming batches in, we will need to respond to new batches from
+                // `input1` with logic that would have otherwise been here. Check out the next loop
+                // for the structure.
+            });
+            // At this point, `ack1` should exactly equal `trace1.read_upper()`, as they are both determined by
+            // iterating through batches and capturing the upper bound. This is a great moment to assert that
+            // `trace1`'s physical compaction frontier is before the frontier of completed times in `trace1`.
+            // TODO: in the case that this does not hold, instead "upgrade" the physical compaction frontier.
+            assert!(PartialOrder::less_equal(&trace1.get_physical_compaction(), &acknowledged1.borrow()));
+
+            // We capture batch2 cursors first and establish work second to avoid taking a `RefCell` lock
+            // on both traces at the same time, as they could be the same trace and this would panic.
+            let mut batch2_cursors = Vec::new();
+            trace2.map_batches(|batch2| {
+                acknowledged2.clone_from(batch2.upper());
+                batch2_cursors.push((batch2.cursor(), batch2.clone()));
+            });
+            // At this point, `ack2` should exactly equal `trace2.read_upper()`, as they are both determined by
+            // iterating through batches and capturing the upper bound. This is a great moment to assert that
+            // `trace2`'s physical compaction frontier is before the frontier of completed times in `trace2`.
+            // TODO: in the case that this does not hold, instead "upgrade" the physical compaction frontier.
+            assert!(PartialOrder::less_equal(&trace2.get_physical_compaction(), &acknowledged2.borrow()));
+
+            // Load up deferred work using trace2 cursors and batches captured just above.
+            for (batch2_cursor, batch2) in batch2_cursors.into_iter() {
+                // It is safe to ask for `ack1` because we have confirmed it to be in advance of `distinguish_since`.
+                let (trace1_cursor, trace1_storage) = trace1.cursor_through(acknowledged1.borrow()).unwrap();
+                // We could downgrade the capability here, but doing so is a bit complicated mathematically.
+                // TODO: downgrade the capability by searching out the one time in `batch2.lower()` and not
+                // in `batch2.upper()`. Only necessary for non-empty batches, as empty batches may not have
+                // that property.
+                todo2.push_back(Deferred::new(trace1_cursor, trace1_storage, batch2_cursor, batch2.clone(), capability.clone()));
+            }
+
+            // Droppable handles to shared trace data structures.
+            let mut trace1_option = Some(trace1);
+            let mut trace2_option = Some(trace2);
+
+            // Swappable buffers for input extraction.
+            let mut input1_buffer = Vec::new();
+            let mut input2_buffer = Vec::new();
+
             move |input1, input2, output| {
 
+                // 1. Consuming input.
+                //
                 // The join computation repeatedly accepts batches of updates from each of its inputs.
                 //
                 // For each accepted batch, it prepares a work-item to join the batch against previously "accepted"
-                // updates from its other input. It is important to track which updates have been accepted, through
-                // a combination of the input's frontier and the most recently received batch's upper bound, because
+                // updates from its other input. It is important to track which updates have been accepted, because
                 // we use a shared trace and there may be updates present that are in advance of this accepted bound.
+                //
+                // Batches are accepted: 1. in bulk at start-up (above), 2. as we observe them in the input stream,
+                // and 3. if the trace can confirm a region of empty space directly following our accepted bound.
+                // This last case is a consequence of our inability to transmit empty batches, as they may be formed
+                // in the absence of timely dataflow capabilities.
 
-                // drain input 1, prepare work.
+                // Drain input 1, prepare work.
                 input1.for_each(|capability, data| {
-                    if let Some(ref mut trace2) = trace2 {
+                    // This test *should* always pass, as we only drop a trace in response to the other input emptying.
+                    if let Some(ref mut trace2) = trace2_option {
                         let capability = capability.retain();
                         data.swap(&mut input1_buffer);
                         for batch1 in input1_buffer.drain(..) {
-                            if !batch1.is_empty() {
-                                if let Some(acknowledged2) = &acknowledged2 {
-                                    // TODO : cursor_through may be problematic for pre-merged traces.
-                                    // A trace should provide the contract that whatever its `distinguish_since` capability,
-                                    // it is safe (and reasonable) to await delivery of batches up through that frontier.
-                                    // In this case, we should be able to await (not block on) the arrival of these batches.
+                            // Ignore any pre-loaded data.
+                            if PartialOrder::less_equal(&acknowledged1, &batch1.lower()) {
+                                if !batch1.is_empty() {
+                                    // It is safe to ask for `ack2` as we validated that it was at least `get_physical_compaction()`
+                                    // at start-up, and have held back physical compaction ever since.
                                     let (trace2_cursor, trace2_storage) = trace2.cursor_through(acknowledged2.borrow()).unwrap();
                                     let batch1_cursor = batch1.cursor();
-                                    todo1.push_back(Deferred::new(trace2_cursor, trace2_storage, batch1_cursor, batch1.clone(), capability.clone(), |r2,r1| (r1.clone()) * (r2.clone())));
+                                    todo1.push_back(Deferred::new(trace2_cursor, trace2_storage, batch1_cursor, batch1.clone(), capability.clone()));
                                 }
-                            }
 
-                            // It would be alarming (incorrect) to receieve a non-empty batch that does not advance the
-                            // acknowledged frontier, as each batch must be greater than previous batches, and the input.
-                            // Empty batches may be received as information races between frontier forwarding of the trace
-                            // and the empty batches themselves (which can be sent as part of trace importing).
-                            if acknowledged1.is_none() { acknowledged1 = Some(timely::progress::frontier::Antichain::from_elem(<G::Timestamp>::minimum())); }
-                            if let Some(acknowledged1) = &mut acknowledged1 {
-                                if !PartialOrder::less_equal(&*acknowledged1, batch1.upper()) {
-                                        if !batch1.is_empty() {
-                                        panic!("Non-empty batch1 upper not beyond acknowledged frontier: {:?}, {:?}", batch1.upper(), acknowledged1);
-                                    }
-                                }
+                                // To update `acknowledged1` we might presume that `batch1.lower` should equal it, but we
+                                // may have skipped over empty batches. Still, the batches are in-order, and we should be
+                                // able to just assume the most recent `batch1.upper`
+                                debug_assert!(PartialOrder::less_equal(&acknowledged1, batch1.upper()));
                                 acknowledged1.clone_from(batch1.upper());
                             }
                         }
                     }
+                    else { panic!("`trace2_option` dropped before `input1` emptied!"); }
                 });
 
-                // drain input 2, prepare work.
+                // Drain input 2, prepare work.
                 input2.for_each(|capability, data| {
-                    if let Some(ref mut trace1) = trace1 {
+                    // This test *should* always pass, as we only drop a trace in response to the other input emptying.
+                    if let Some(ref mut trace1) = trace1_option {
                         let capability = capability.retain();
                         data.swap(&mut input2_buffer);
                         for batch2 in input2_buffer.drain(..) {
-                            if !batch2.is_empty() {
-                                if let Some(acknowledged1) = &acknowledged1 {
-                                    // TODO : cursor_through may be problematic for pre-merged traces.
-                                    // A trace should provide the contract that whatever its `distinguish_since` capability,
-                                    // it is safe (and reasonable) to await delivery of batches up through that frontier.
-                                    // In this case, we should be able to await (not block on) the arrival of these batches.
+                            // Ignore any pre-loaded data.
+                            if PartialOrder::less_equal(&acknowledged2, &batch2.lower()) {
+                                if !batch2.is_empty() {
+                                    // It is safe to ask for `ack1` as we validated that it was at least `get_physical_compaction()`
+                                    // at start-up, and have held back physical compaction ever since.
                                     let (trace1_cursor, trace1_storage) = trace1.cursor_through(acknowledged1.borrow()).unwrap();
                                     let batch2_cursor = batch2.cursor();
-                                    todo2.push_back(Deferred::new(trace1_cursor, trace1_storage, batch2_cursor, batch2.clone(), capability.clone(), |r1,r2| (r1.clone()) * (r2.clone())));
+                                    todo2.push_back(Deferred::new(trace1_cursor, trace1_storage, batch2_cursor, batch2.clone(), capability.clone()));
                                 }
-                            }
-                            // It would be alarming (incorrect) to receieve a non-empty batch that does not advance the
-                            // acknowledged frontier, as each batch must be greater than previous batches, and the input.
-                            // Empty batches may be received as information races between frontier forwarding of the trace
-                            // and the empty batches themselves (which can be sent as part of trace importing).
-                            if acknowledged2.is_none() { acknowledged2 = Some(timely::progress::frontier::Antichain::from_elem(<G::Timestamp>::minimum())); }
-                            if let Some(acknowledged2) = &mut acknowledged2 {
-                                if !PartialOrder::less_equal(&*acknowledged2, batch2.upper()) {
-                                    if !batch2.is_empty() {
-                                        panic!("Non-empty batch2 upper not beyond acknowledged frontier: {:?}, {:?}", batch2.upper(), acknowledged2);
-                                    }
-                                }
+
+                                // To update `acknowledged2` we might presume that `batch2.lower` should equal it, but we
+                                // may have skipped over empty batches. Still, the batches are in-order, and we should be
+                                // able to just assume the most recent `batch2.upper`
+                                debug_assert!(PartialOrder::less_equal(&acknowledged2, batch2.upper()));
                                 acknowledged2.clone_from(batch2.upper());
                             }
                         }
                     }
+                    else { panic!("`trace1_option` dropped before `input2` emptied!"); }
                 });
 
+                // Advance acknowledged frontiers through any empty regions that we may not receive as batches.
+                if let Some(trace1) = trace1_option.as_mut() {
+                    trace1.advance_upper(&mut acknowledged1);
+                }
+                if let Some(trace2) = trace2_option.as_mut() {
+                    trace2.advance_upper(&mut acknowledged2);
+                }
+
+                // 2. Join computation.
+                //
                 // For each of the inputs, we do some amount of work (measured in terms of number
                 // of output records produced). This is meant to yield control to allow downstream
                 // operators to consume and reduce the output, but it it also means to provide some
@@ -428,17 +483,27 @@ impl<G, T1> JoinCore<G, T1::Key, T1::Val, T1::R> for Arranged<G,T1>
                 // which results in unintentionally quadratic processing time (each batch of either
                 // input must scan all batches from the other input).
 
-                // perform some amount of outstanding work.
+                // Perform some amount of outstanding work.
                 let mut fuel = 1_000_000;
                 while !todo1.is_empty() && fuel > 0 {
-                    todo1.front_mut().unwrap().work(output, &mut |k,v2,v1| result(k,v1,v2), &mut fuel);
+                    todo1.front_mut().unwrap().work(
+                        output,
+                        |k,v2,v1| result(k,v1,v2),
+                        |r2,r1| (r1.clone()).multiply(r2),
+                        &mut fuel
+                    );
                     if !todo1.front().unwrap().work_remains() { todo1.pop_front(); }
                 }
 
-                // perform some amount of outstanding work.
+                // Perform some amount of outstanding work.
                 let mut fuel = 1_000_000;
                 while !todo2.is_empty() && fuel > 0 {
-                    todo2.front_mut().unwrap().work(output, &mut |k,v1,v2| result(k,v1,v2), &mut fuel);
+                    todo2.front_mut().unwrap().work(
+                        output,
+                        |k,v1,v2| result(k,v1,v2),
+                        |r1,r2| (r1.clone()).multiply(r2),
+                        &mut fuel
+                    );
                     if !todo2.front().unwrap().work_remains() { todo2.pop_front(); }
                 }
 
@@ -447,31 +512,42 @@ impl<G, T1> JoinCore<G, T1::Key, T1::Val, T1::R> for Arranged<G,T1>
                     activator.activate();
                 }
 
-                // shut down or advance trace2.
-                if trace2.is_some() && input1.frontier().is_empty() { trace2 = None; }
-                if let Some(ref mut trace2) = trace2 {
-                    trace2.advance_by(input1.frontier().frontier());
-                    // At this point, if we haven't seen any input batches we should establish a frontier anyhow.
-                    if acknowledged2.is_none() {
-                        acknowledged2 = Some(Antichain::from_elem(<G::Timestamp>::minimum()));
-                    }
-                    if let Some(acknowledged2) = &mut acknowledged2 {
-                        trace2.advance_upper(acknowledged2);
-                        trace2.distinguish_since(acknowledged2.borrow());
+                // 3. Trace maintenance.
+                //
+                // Importantly, we use `input.frontier()` here rather than `acknowledged` to track
+                // the progress of an input, because should we ever drop one of the traces we will
+                // lose the ability to extract information from anything other than the input.
+                // For example, if we dropped `trace2` we would not be able to use `advance_upper`
+                // to keep `acknowledged2` up to date wrt empty batches, and would hold back logical
+                // compaction of `trace1`.
+
+                // Maintain `trace1`. Drop if `input2` is empty, or advance based on future needs.
+                if let Some(trace1) = trace1_option.as_mut() {
+                    if input2.frontier().is_empty() { trace1_option = None; }
+                    else {
+                        // Allow `trace1` to compact logically up to the frontier we may yet receive,
+                        // in the opposing input (`input2`). All `input2` times will be beyond this
+                        // frontier, and joined times only need to be accurate when advanced to it.
+                        trace1.set_logical_compaction(input2.frontier().frontier());
+                        // Allow `trace1` to compact physically up to the upper bound of batches we
+                        // have received in its input (`input1`). We will not require a cursor that
+                        // is not beyond this bound.
+                        trace1.set_physical_compaction(acknowledged1.borrow());
                     }
                 }
 
-                // shut down or advance trace1.
-                if trace1.is_some() && input2.frontier().is_empty() { trace1 = None; }
-                if let Some(ref mut trace1) = trace1 {
-                    trace1.advance_by(input2.frontier().frontier());
-                    // At this point, if we haven't seen any input batches we should establish a frontier anyhow.
-                    if acknowledged1.is_none() {
-                        acknowledged1 = Some(Antichain::from_elem(<G::Timestamp>::minimum()));
-                    }
-                    if let Some(acknowledged1) = &mut acknowledged1 {
-                        trace1.advance_upper(acknowledged1);
-                        trace1.distinguish_since(acknowledged1.borrow());
+                // Maintain `trace2`. Drop if `input1` is empty, or advance based on future needs.
+                if let Some(trace2) = trace2_option.as_mut() {
+                    if input1.frontier().is_empty() { trace2_option = None;}
+                    else {
+                        // Allow `trace2` to compact logically up to the frontier we may yet receive,
+                        // in the opposing input (`input1`). All `input1` times will be beyond this
+                        // frontier, and joined times only need to be accurate when advanced to it.
+                        trace2.set_logical_compaction(input1.frontier().frontier());
+                        // Allow `trace2` to compact physically up to the upper bound of batches we
+                        // have received in its input (`input2`). We will not require a cursor that
+                        // is not beyond this bound.
+                        trace2.set_physical_compaction(acknowledged2.borrow());
                     }
                 }
             }
@@ -485,16 +561,16 @@ impl<G, T1> JoinCore<G, T1::Key, T1::Val, T1::R> for Arranged<G,T1>
 /// The structure wraps cursors which allow us to play out join computation at whatever rate we like.
 /// This allows us to avoid producing and buffering massive amounts of data, without giving the timely
 /// dataflow system a chance to run operators that can consume and aggregate the data.
-struct Deferred<K, V1, V2, T, R1, R2, R3, C1, C2, M, D>
+struct Deferred<K, V1, V2, T, R1, R2, R3, C1, C2, D>
 where
     V1: Ord+Clone,
     V2: Ord+Clone,
     T: Timestamp+Lattice+Ord+Debug,
     R1: Semigroup,
     R2: Semigroup,
+    R3: Semigroup,
     C1: Cursor<K, V1, T, R1>,
     C2: Cursor<K, V2, T, R2>,
-    M: FnMut(&R1,&R2)->R3,
     D: Ord+Clone+Data,
 {
     phant: ::std::marker::PhantomData<(K, V1, V2, R1, R2)>,
@@ -503,13 +579,11 @@ where
     batch: C2,
     batch_storage: C2::Storage,
     capability: Capability<T>,
-    mult: M,
     done: bool,
     temp: Vec<((D, T), R3)>,
-    // thinker: JoinThinker<V1, V2, T, R1, R2>,
 }
 
-impl<K, V1, V2, T, R1, R2, R3, C1, C2, M, D> Deferred<K, V1, V2, T, R1, R2, R3, C1, C2, M, D>
+impl<K, V1, V2, T, R1, R2, R3, C1, C2, D> Deferred<K, V1, V2, T, R1, R2, R3, C1, C2, D>
 where
     K: Ord+Debug+Eq,
     V1: Ord+Clone+Debug,
@@ -520,10 +594,9 @@ where
     R3: Semigroup,
     C1: Cursor<K, V1, T, R1>,
     C2: Cursor<K, V2, T, R2>,
-    M: FnMut(&R1,&R2)->R3,
     D: Ord+Clone+Data,
 {
-    fn new(trace: C1, trace_storage: C1::Storage, batch: C2, batch_storage: C2::Storage, capability: Capability<T>, mult: M) -> Self {
+    fn new(trace: C1, trace_storage: C1::Storage, batch: C2, batch_storage: C2::Storage, capability: Capability<T>) -> Self {
         Deferred {
             phant: ::std::marker::PhantomData,
             trace,
@@ -531,10 +604,8 @@ where
             batch,
             batch_storage,
             capability,
-            mult,
             done: false,
             temp: Vec::new(),
-            // thinker: JoinThinker::new(),
         }
     }
 
@@ -544,8 +615,8 @@ where
 
     /// Process keys until at least `limit` output tuples produced, or the work is exhausted.
     #[inline(never)]
-    fn work<L, I>(&mut self, output: &mut OutputHandle<T, (D, T, R3), Tee<T, (D, T, R3)>>, logic: &mut L, fuel: &mut usize)
-    where I: IntoIterator<Item=D>, L: FnMut(&K, &V1, &V2)->I {
+    fn work<L, M, I>(&mut self, output: &mut OutputHandle<T, (D, T, R3), Tee<T, (D, T, R3)>>, mut logic: L, mut mult: M, fuel: &mut usize)
+    where I: IntoIterator<Item=D>, L: FnMut(&K, &V1, &V2)->I, M: FnMut(&R1,&R2)->R3 {
 
         let meet = self.capability.time();
 
@@ -557,10 +628,8 @@ where
 
         let trace = &mut self.trace;
         let batch = &mut self.batch;
-        let mult = &mut self.mult;
 
         let temp = &mut self.temp;
-        // let thinker = &mut self.thinker;
         let mut thinker = JoinThinker::new();
 
         while batch.key_valid(batch_storage) && trace.key_valid(trace_storage) && effort < *fuel {

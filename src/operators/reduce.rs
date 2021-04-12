@@ -253,7 +253,6 @@ pub trait ReduceCore<G: Scope, K: Data, V: Data, R: Semigroup> where G::Timestam
     /// use differential_dataflow::operators::reduce::ReduceCore;
     /// use differential_dataflow::trace::Trace;
     /// use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    /// use differential_dataflow::hashable::OrdWrapper;
     ///
     /// fn main() {
     ///     ::timely::example(|scope| {
@@ -282,7 +281,7 @@ pub trait ReduceCore<G: Scope, K: Data, V: Data, R: Semigroup> where G::Timestam
                 if !input.is_empty() {
                     logic(key, input, change);
                 }
-                change.extend(output.drain(..).map(|(x,d)| (x,-d)));
+                change.extend(output.drain(..).map(|(x,d)| (x, d.negate())));
                 crate::consolidation::consolidate(change);
             })
         }
@@ -624,12 +623,12 @@ where
                         }
 
                         // We only anticipate future times in advance of `upper_limit`.
-                        source_trace.advance_by(upper_limit.borrow());
-                        output_reader.advance_by(upper_limit.borrow());
+                        source_trace.set_logical_compaction(upper_limit.borrow());
+                        output_reader.set_logical_compaction(upper_limit.borrow());
 
                         // We will only slice the data between future batches.
-                        source_trace.distinguish_since(upper_limit.borrow());
-                        output_reader.distinguish_since(upper_limit.borrow());
+                        source_trace.set_physical_compaction(upper_limit.borrow());
+                        output_reader.set_physical_compaction(upper_limit.borrow());
                     }
 
                     // Exert trace maintenance if we have been so requested.

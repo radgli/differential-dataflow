@@ -6,8 +6,6 @@ use timely::dataflow::channels::pact::{Pipeline, Exchange};
 use timely::dataflow::operators::Operator;
 use timely::progress::Antichain;
 
-use timely_sort::Unsigned;
-
 use differential_dataflow::{ExchangeData, Collection, AsCollection, Hashable};
 use differential_dataflow::difference::{Semigroup, Monoid};
 use differential_dataflow::lattice::Lattice;
@@ -45,7 +43,7 @@ where
     S: FnMut(&D, &R, &Tr::Val, &Tr::R)->(DOut, ROut)+'static,
 {
     // No need to block physical merging for this operator.
-    arrangement.trace.distinguish_since(Antichain::new().borrow());
+    arrangement.trace.set_physical_compaction(Antichain::new().borrow());
     let mut propose_trace = Some(arrangement.trace);
     let propose_stream = arrangement.stream;
 
@@ -58,7 +56,7 @@ where
     let mut key: Tr::Key = supplied_key0;
     let exchange = Exchange::new(move |update: &(D,G::Timestamp,R)| {
         logic1(&update.0, &mut key);
-        key.hashed().as_u64()
+        key.hashed().into()
     });
 
     let mut key1: Tr::Key = supplied_key1;
@@ -105,7 +103,7 @@ where
                                 while let Some(value) = cursor.get_val(&storage) {
                                     let mut count = Tr::R::zero();
                                     cursor.map_times(&storage, |t, d| {
-                                        if t.less_equal(time) { count += d; }
+                                        if t.less_equal(time) { count.plus_equals(d); }
                                     });
                                     if !count.is_zero() {
                                         let (dout, rout) = output_func(prefix, diff, value, &count);
@@ -138,7 +136,7 @@ where
         for key in stash.keys() {
             frontier.insert(key.time().clone());
         }
-        propose_trace.as_mut().map(|trace| trace.advance_by(frontier.borrow()));
+        propose_trace.as_mut().map(|trace| trace.set_logical_compaction(frontier.borrow()));
 
         if input1.frontier().is_empty() && stash.is_empty() {
             propose_trace = None;

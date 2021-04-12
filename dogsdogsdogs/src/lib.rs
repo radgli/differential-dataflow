@@ -2,14 +2,12 @@
 extern crate abomonation_derive;
 extern crate abomonation;
 extern crate timely;
-extern crate timely_sort;
 extern crate differential_dataflow;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde;
 
 use std::hash::Hash;
-use std::ops::Mul;
 
 use timely::dataflow::Scope;
 use timely::progress::Timestamp;
@@ -18,7 +16,7 @@ use timely::dataflow::operators::Concatenate;
 
 use differential_dataflow::{ExchangeData, Collection, AsCollection};
 use differential_dataflow::operators::Threshold;
-use differential_dataflow::difference::Monoid;
+use differential_dataflow::difference::{Monoid, Multiply};
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::arrange::TraceAgent;
 use differential_dataflow::operators::arrange::{ArrangeBySelf, ArrangeByKey};
@@ -33,7 +31,7 @@ pub mod operators;
     Implementors of `PrefixExtension` provide types and methods for extending a differential dataflow collection,
     via the three methods `count`, `propose`, and `validate`.
 **/
-pub trait PrefixExtender<G: Scope, R: Monoid+Mul<Output = R>> {
+pub trait PrefixExtender<G: Scope, R: Monoid+Multiply<Output = R>> {
     /// The required type of prefix to extend.
     type Prefix;
     /// The type to be produced as extension.
@@ -46,7 +44,7 @@ pub trait PrefixExtender<G: Scope, R: Monoid+Mul<Output = R>> {
     fn validate(&mut self, &Collection<G, (Self::Prefix, Self::Extension), R>) -> Collection<G, (Self::Prefix, Self::Extension), R>;
 }
 
-pub trait ProposeExtensionMethod<G: Scope, P: ExchangeData+Ord, R: Monoid+Mul<Output = R>> {
+pub trait ProposeExtensionMethod<G: Scope, P: ExchangeData+Ord, R: Monoid+Multiply<Output = R>> {
     fn propose_using<PE: PrefixExtender<G, R, Prefix=P>>(&self, extender: &mut PE) -> Collection<G, (P, PE::Extension), R>;
     fn extend<E: ExchangeData+Ord>(&self, extenders: &mut [&mut dyn PrefixExtender<G,R,Prefix=P,Extension=E>]) -> Collection<G, (P, E), R>;
 }
@@ -55,7 +53,7 @@ impl<G, P, R> ProposeExtensionMethod<G, P, R> for Collection<G, P, R>
 where
     G: Scope,
     P: ExchangeData+Ord,
-    R: Monoid+Mul<Output = R>,
+    R: Monoid+Multiply<Output = R>,
 {
     fn propose_using<PE>(&self, extender: &mut PE) -> Collection<G, (P, PE::Extension), R>
     where
@@ -94,11 +92,11 @@ where
     }
 }
 
-pub trait ValidateExtensionMethod<G: Scope, R: Monoid+Mul<Output = R>, P, E> {
+pub trait ValidateExtensionMethod<G: Scope, R: Monoid+Multiply<Output = R>, P, E> {
     fn validate_using<PE: PrefixExtender<G, R, Prefix=P, Extension=E>>(&self, extender: &mut PE) -> Collection<G, (P, E), R>;
 }
 
-impl<G: Scope, R: Monoid+Mul<Output = R>, P, E> ValidateExtensionMethod<G, R, P, E> for Collection<G, (P, E), R> {
+impl<G: Scope, R: Monoid+Multiply<Output = R>, P, E> ValidateExtensionMethod<G, R, P, E> for Collection<G, (P, E), R> {
     fn validate_using<PE: PrefixExtender<G, R, Prefix=P, Extension=E>>(&self, extender: &mut PE) -> Collection<G, (P, E), R> {
         extender.validate(self)
     }
@@ -114,7 +112,7 @@ where
     K: ExchangeData,
     V: ExchangeData,
     T: Lattice+ExchangeData+Timestamp,
-    R: Monoid+Mul<Output = R>+ExchangeData,
+    R: Monoid+Multiply<Output = R>+ExchangeData,
 {
     /// A trace of type (K, ()), used to count extensions for each prefix.
     count_trace: TraceKeyHandle<K, T, isize>,
@@ -131,7 +129,7 @@ where
     K: ExchangeData+Hash,
     V: ExchangeData+Hash,
     T: Lattice+ExchangeData+Timestamp,
-    R: Monoid+Mul<Output = R>+ExchangeData,
+    R: Monoid+Multiply<Output = R>+ExchangeData,
 {
     fn clone(&self) -> Self {
         CollectionIndex {
@@ -147,7 +145,7 @@ where
     K: ExchangeData+Hash,
     V: ExchangeData+Hash,
     T: Lattice+ExchangeData+Timestamp,
-    R: Monoid+Mul<Output = R>+ExchangeData,
+    R: Monoid+Multiply<Output = R>+ExchangeData,
 {
 
     pub fn index<G: Scope<Timestamp = T>>(collection: &Collection<G, (K, V), R>) -> Self {
@@ -182,7 +180,7 @@ where
     K: ExchangeData,
     V: ExchangeData,
     T: Lattice+ExchangeData+Timestamp,
-    R: Monoid+Mul<Output = R>+ExchangeData,
+    R: Monoid+Multiply<Output = R>+ExchangeData,
     F: Fn(&P)->K+Clone,
 {
     phantom: std::marker::PhantomData<P>,
@@ -197,7 +195,7 @@ where
     V: ExchangeData+Hash+Default,
     P: ExchangeData,
     G::Timestamp: Lattice+ExchangeData,
-    R: Monoid+Mul<Output = R>+ExchangeData,
+    R: Monoid+Multiply<Output = R>+ExchangeData,
     F: Fn(&P)->K+Clone+'static,
 {
     type Prefix = P;

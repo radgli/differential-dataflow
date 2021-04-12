@@ -34,8 +34,8 @@ where
 {
     trace: Rc<RefCell<TraceBox<Tr>>>,
     queues: Weak<RefCell<Vec<TraceAgentQueueWriter<Tr>>>>,
-    advance: Antichain<Tr::Time>,
-    through: Antichain<Tr::Time>,
+    logical_compaction: Antichain<Tr::Time>,
+    physical_compaction: Antichain<Tr::Time>,
 
     operator: ::timely::dataflow::operators::generic::OperatorInfo,
     logging: Option<::logging::Logger>,
@@ -54,26 +54,27 @@ where
     type Batch = Tr::Batch;
     type Cursor = Tr::Cursor;
 
-    fn advance_by(&mut self, frontier: AntichainRef<Tr::Time>) {
-        self.trace.borrow_mut().adjust_advance_frontier(self.advance.borrow(), frontier);
-        self.advance.clear();
-        self.advance.extend(frontier.iter().cloned());
+    fn set_logical_compaction(&mut self, frontier: AntichainRef<Tr::Time>) {
+        self.trace.borrow_mut().adjust_logical_compaction(self.logical_compaction.borrow(), frontier);
+        self.logical_compaction.clear();
+        self.logical_compaction.extend(frontier.iter().cloned());
     }
-    fn advance_frontier(&mut self) -> AntichainRef<Tr::Time> {
-        self.advance.borrow()
+    fn get_logical_compaction(&mut self) -> AntichainRef<Tr::Time> {
+        self.logical_compaction.borrow()
     }
-    fn distinguish_since(&mut self, frontier: AntichainRef<Tr::Time>) {
-        self.trace.borrow_mut().adjust_through_frontier(self.through.borrow(), frontier);
-        self.through.clear();
-        self.through.extend(frontier.iter().cloned());
+    fn set_physical_compaction(&mut self, frontier: AntichainRef<Tr::Time>) {
+        debug_assert!(timely::PartialOrder::less_equal(&self.physical_compaction.borrow(), &frontier));
+        self.trace.borrow_mut().adjust_physical_compaction(self.physical_compaction.borrow(), frontier);
+        self.physical_compaction.clear();
+        self.physical_compaction.extend(frontier.iter().cloned());
     }
-    fn distinguish_frontier(&mut self) -> AntichainRef<Tr::Time> {
-        self.through.borrow()
+    fn get_physical_compaction(&mut self) -> AntichainRef<Tr::Time> {
+        self.physical_compaction.borrow()
     }
     fn cursor_through(&mut self, frontier: AntichainRef<Tr::Time>) -> Option<(Tr::Cursor, <Tr::Cursor as Cursor<Tr::Key, Tr::Val, Tr::Time, Tr::R>>::Storage)> {
         self.trace.borrow_mut().trace.cursor_through(frontier)
     }
-    fn map_batches<F: FnMut(&Self::Batch)>(&mut self, f: F) { self.trace.borrow_mut().trace.map_batches(f) }
+    fn map_batches<F: FnMut(&Self::Batch)>(&self, f: F) { self.trace.borrow().trace.map_batches(f) }
 }
 
 impl<Tr> TraceAgent<Tr>
@@ -99,8 +100,8 @@ where
         let reader = TraceAgent {
             trace: trace.clone(),
             queues: Rc::downgrade(&queues),
-            advance: trace.borrow().advance_frontiers.frontier().to_owned(),
-            through: trace.borrow().through_frontiers.frontier().to_owned(),
+            logical_compaction: trace.borrow().logical_compaction.frontier().to_owned(),
+            physical_compaction: trace.borrow().physical_compaction.frontier().to_owned(),
             operator,
             logging,
         };
@@ -163,13 +164,13 @@ where
     /// are no longer evident.
     ///
     /// The current behavior is that the introduced collection accumulates updates to some times less or equal
-    /// to `self.advance_frontier()`. There is *not* currently a guarantee that the updates are accumulated *to*
+    /// to `self.get_logical_compaction()`. There is *not* currently a guarantee that the updates are accumulated *to*
     /// the frontier, and the resulting collection history may be weirdly partial until this point. In particular,
     /// the historical collection may move through configurations that did not actually occur, even if eventually
     /// arriving at the correct collection. This is probably a bug; although we get to the right place in the end,
     /// the intermediate computation could do something that the original computation did not, like diverge.
     ///
-    /// I would expect the semantics to improve to "updates are advanced to `self.advance_frontier()`", which
+    /// I would expect the semantics to improve to "updates are advanced to `self.get_logical_compaction()`", which
     /// means the computation will run as if starting from exactly this frontier. It is not currently clear whose
     /// responsibility this should be (the trace/batch should only reveal these times, or an operator should know
     /// to advance times before using them).
@@ -186,7 +187,6 @@ where
     /// use differential_dataflow::operators::reduce::Reduce;
     /// use differential_dataflow::trace::Trace;
     /// use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    /// use differential_dataflow::hashable::OrdWrapper;
     ///
     /// fn main() {
     ///     ::timely::execute(Config::thread(), |worker| {
@@ -246,7 +246,6 @@ where
     /// use differential_dataflow::operators::reduce::Reduce;
     /// use differential_dataflow::trace::Trace;
     /// use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    /// use differential_dataflow::hashable::OrdWrapper;
     ///
     /// fn main() {
     ///     ::timely::execute(Config::thread(), |worker| {
@@ -341,7 +340,7 @@ where
 
     /// Imports an arrangement into the supplied scope.
     ///
-    /// This variant of import uses the `advance_frontier` to forcibly advance timestamps in updates.
+    /// This variant of import uses the `get_logical_compaction` to forcibly advance timestamps in updates.
     ///
     /// # Examples
     ///
@@ -360,7 +359,6 @@ where
     /// use differential_dataflow::trace::Trace;
     /// use differential_dataflow::trace::TraceReader;
     /// use differential_dataflow::trace::implementations::ord::OrdValSpine;
-    /// use differential_dataflow::hashable::OrdWrapper;
     /// use differential_dataflow::input::Input;
     ///
     /// fn main() {
@@ -382,7 +380,7 @@ where
     ///         handle.remove(1); handle.advance_to(4); handle.flush(); worker.step();
     ///         handle.insert(0); handle.advance_to(5); handle.flush(); worker.step();
     ///
-    ///         trace.advance_by(AntichainRef::new(&[5]));
+    ///         trace.set_logical_compaction(AntichainRef::new(&[5]));
     ///
     ///         // create a second dataflow
     ///         let mut shutdown = worker.dataflow(|scope| {
@@ -418,7 +416,7 @@ where
         Tr: TraceReader,
     {
         // This frontier describes our only guarantee on the compaction frontier.
-        let frontier = self.advance_frontier().to_owned();
+        let frontier = self.get_logical_compaction().to_owned();
         self.import_frontier_core(scope, name, frontier)
     }
 
@@ -533,14 +531,14 @@ where
 
         // increase counts for wrapped `TraceBox`.
         let empty_frontier = Antichain::new();
-        self.trace.borrow_mut().adjust_advance_frontier(empty_frontier.borrow(), self.advance.borrow());
-        self.trace.borrow_mut().adjust_through_frontier(empty_frontier.borrow(), self.through.borrow());
+        self.trace.borrow_mut().adjust_logical_compaction(empty_frontier.borrow(), self.logical_compaction.borrow());
+        self.trace.borrow_mut().adjust_physical_compaction(empty_frontier.borrow(), self.physical_compaction.borrow());
 
         TraceAgent {
             trace: self.trace.clone(),
             queues: self.queues.clone(),
-            advance: self.advance.clone(),
-            through: self.through.clone(),
+            logical_compaction: self.logical_compaction.clone(),
+            physical_compaction: self.physical_compaction.clone(),
             operator: self.operator.clone(),
             logging: self.logging.clone(),
         }
@@ -562,7 +560,7 @@ where
 
         // decrement borrow counts to remove all holds
         let empty_frontier = Antichain::new();
-        self.trace.borrow_mut().adjust_advance_frontier(self.advance.borrow(), empty_frontier.borrow());
-        self.trace.borrow_mut().adjust_through_frontier(self.through.borrow(), empty_frontier.borrow());
+        self.trace.borrow_mut().adjust_logical_compaction(self.logical_compaction.borrow(), empty_frontier.borrow());
+        self.trace.borrow_mut().adjust_physical_compaction(self.physical_compaction.borrow(), empty_frontier.borrow());
     }
 }

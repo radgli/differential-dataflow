@@ -26,8 +26,6 @@ use timely::progress::Timestamp;
 use timely::progress::{Antichain, frontier::AntichainRef};
 use timely::dataflow::operators::Capability;
 
-use timely_sort::Unsigned;
-
 use ::{Data, ExchangeData, Collection, AsCollection, Hashable};
 use ::difference::Semigroup;
 use lattice::Lattice;
@@ -274,12 +272,12 @@ where
         Tr: 'static,
     {
         // while the arrangement is already correctly distributed, the query stream may not be.
-        let exchange = Exchange::new(move |update: &(Tr::Key,G::Timestamp)| update.0.hashed().as_u64());
+        let exchange = Exchange::new(move |update: &(Tr::Key,G::Timestamp)| update.0.hashed().into());
         queries.binary_frontier(&self.stream, exchange, Pipeline, "TraceQuery", move |_capability, _info| {
 
             let mut trace = Some(self.trace.clone());
-            // release `distinguish_since` capability.
-            trace.as_mut().unwrap().distinguish_since(Antichain::new().borrow());
+            // release `set_physical_compaction` capability.
+            trace.as_mut().unwrap().set_physical_compaction(Antichain::new().borrow());
 
             let mut stash = Vec::new();
             let mut capability: Option<Capability<G::Timestamp>> = None;
@@ -407,13 +405,13 @@ where
 
                 // Determine new frontier on queries that may be issued.
                 // TODO: This code looks very suspect; explain better or fix.
-                let frontier = [
+                let frontier = std::array::IntoIter::new([
                     capability.as_ref().map(|c| c.time().clone()),
                     input1.frontier().frontier().get(0).cloned(),
-                ].into_iter().cloned().filter_map(|t| t).min();
+                ]).filter_map(|t| t).min();
 
                 if let Some(frontier) = frontier {
-                    trace.as_mut().map(|t| t.advance_by(AntichainRef::new(&[frontier])));
+                    trace.as_mut().map(|t| t.set_logical_compaction(AntichainRef::new(&[frontier])));
                 }
                 else {
                     trace = None;
@@ -484,7 +482,7 @@ where
         Tr::Batch: Batch<K, V, G::Timestamp, R>,
         Tr::Cursor: Cursor<K, V, G::Timestamp, R>,
     {
-        let exchange = Exchange::new(move |update: &((K,V),G::Timestamp,R)| (update.0).0.hashed().as_u64());
+        let exchange = Exchange::new(move |update: &((K,V),G::Timestamp,R)| (update.0).0.hashed().into());
         self.arrange_core(exchange, name)
     }
 
